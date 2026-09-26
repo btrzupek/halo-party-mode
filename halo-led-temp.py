@@ -6,8 +6,11 @@ Cool = slow blue breathing; hot = fast red breathing. Uses the hotter of the
 amdgpu 'edge' and k10temp 'Tctl' sensors. Restores the original LED state on exit.
 Requires root (sysfs writes). Uses the amd_halo_led multicolor LED interface.
 
-  sudo ./halo-led-temp.py            # run
-  sudo ./halo-led-temp.py --verbose  # also print temps / write latency
+  sudo ./halo-led-temp.py                # run
+  sudo ./halo-led-temp.py --verbose      # also print temps / write latency
+  sudo ./halo-led-temp.py --demo         # sweep the full color range
+  sudo ./halo-led-temp.py --demo=120     # ...taking 120 s per sweep instead of 60
+  sudo ./halo-led-temp.py --peak=0.4     # cap brightness at 40%
 """
 import glob, math, os, signal, sys, time
 
@@ -21,12 +24,23 @@ STOPS = [
     (92, (255, 90, 0)),     # very hot: orange
     (102, (255, 0, 0)),     # near peak: red
 ]
-SLOW_PERIOD, FAST_PERIOD = 4.0, 0.8   # seconds per breath (cool -> hot)
+SLOW_PERIOD, FAST_PERIOD = 8.0, 3.0   # seconds per breath (cool -> hot); keep well
+                                      # under 3 flashes/s (photosensitivity guideline)
 MIN_BRIGHT = 0.12                     # floor so the bar never fully goes dark
+PEAK_BRIGHT = 1.0                     # top of each breath (0-1); --peak=N overrides
+DEMO_SECONDS = 60                     # --demo: seconds to sweep cool -> hot -> cool
 GAMMA = 2.0                           # perceptual correction so the fade looks even
 FRAME = 0.05                          # target 20 fps
 TEMP_POLL = 1.0                       # re-read temperature every second
 VERBOSE = "--verbose" in sys.argv or "-v" in sys.argv
+DEMO = None
+for arg in sys.argv[1:]:
+    if arg == "--demo":
+        DEMO = DEMO_SECONDS
+    elif arg.startswith("--demo="):
+        DEMO = float(arg.split("=", 1)[1])
+    elif arg.startswith("--peak="):
+        PEAK_BRIGHT = min(max(float(arg.split("=", 1)[1]), MIN_BRIGHT), 1.0)
 
 
 def find_led():
@@ -82,6 +96,12 @@ def temp_to_period(t):
     return SLOW_PERIOD + (FAST_PERIOD - SLOW_PERIOD) * f
 
 
+def demo_temp(elapsed):
+    """Fake temperature that eases from the coolest stop to the hottest and back."""
+    lo, hi = STOPS[0][0], STOPS[-1][0]
+    return lo + (hi - lo) * (0.5 - 0.5 * math.cos(2 * math.pi * elapsed / DEMO))
+
+
 def write(path, value):
     with open(path, "w") as f:
         f.write(value)
@@ -93,6 +113,9 @@ def main():
     max_b = int(open(f"{led}/max_brightness").read())
     idx = {"red": 0, "green": 1, "blue": 2}
     print(f"LED: {led} ({' '.join(order)}), sensors: {sensors}", flush=True)
+    if DEMO:
+        print(f"Demo mode: sweeping {STOPS[0][0]}-{STOPS[-1][0]}C every {DEMO:g}s "
+              "(stop the halo-led-temp service first so they don't fight)", flush=True)
 
     # remember original state so we can put it back on exit
     orig_int = open(f"{led}/multi_intensity").read().strip()
@@ -114,14 +137,16 @@ def main():
 
     phase, last_poll, temp = 0.0, 0.0, 0.0
     last_color, last_level = None, None
-    prev = time.monotonic()
+    prev = start = time.monotonic()
     try:
         while True:
             now = time.monotonic()
             dt, prev = now - prev, now
 
+            if DEMO:
+                temp = demo_temp(now - start)       # every frame, for a smooth sweep
             if now - last_poll >= TEMP_POLL:
-                temps = read_temps(sensors)
+                temps = {"demo": temp} if DEMO else read_temps(sensors)
                 if temps:
                     temp = max(temps.values())
                 last_poll = now
@@ -141,7 +166,7 @@ def main():
             # sine "breathing" curve, speed set by temperature; uses real elapsed time
             phase = (phase + dt / temp_to_period(temp)) % 1.0
             wave = 0.5 - 0.5 * math.cos(2 * math.pi * phase)
-            level = MIN_BRIGHT + (1 - MIN_BRIGHT) * wave ** GAMMA
+            level = MIN_BRIGHT + (PEAK_BRIGHT - MIN_BRIGHT) * wave ** GAMMA
             b = round(level * max_b)
             if b != last_level:
                 write(f"{led}/brightness", str(b))

@@ -8,15 +8,16 @@ working hard.
 
 | Chip temp | Color | Breath |
 |---|---|---|
-| 40 °C (idle) | 🔵 blue | 4.0 s |
-| 55 °C | 🩵 teal | 3.2 s |
-| 70 °C | 🟢 green | 2.5 s |
-| 82 °C (heavy load) | 🟡 yellow | 1.8 s |
-| 92 °C | 🟠 orange | 1.3 s |
-| 102 °C+ | 🔴 red | 0.8 s |
+| 40 °C (idle) | 🔵 blue | 8.0 s |
+| 55 °C | 🩵 teal | 6.8 s |
+| 70 °C | 🟢 green | 5.6 s |
+| 82 °C (heavy load) | 🟡 yellow | 4.6 s |
+| 92 °C | 🟠 orange | 3.8 s |
+| 102 °C+ | 🔴 red | 3.0 s |
 
 Colors blend smoothly between these points. It uses whichever is hotter, the GPU
-(`amdgpu` edge) or the CPU (`k10temp` Tctl).
+(`amdgpu` edge) or the CPU (`k10temp` Tctl). Even at its fastest it breathes once every
+3 seconds, far below the 3-flashes-per-second photosensitivity guideline.
 
 ## Requirements
 
@@ -67,6 +68,22 @@ Or run it for a fixed time:
 sudo timeout -s INT 20 ./halo-led-temp.py -v
 ```
 
+## Demo mode
+
+`--demo` ignores the real temperature and sweeps smoothly from blue to red and back once a
+minute, so you can show off the whole range without heating the machine up. Stop the
+service first so the two don't fight over the LED:
+
+```bash
+sudo systemctl stop halo-led-temp && sudo ./halo-led-temp.py --demo
+```
+
+Use `--demo=120` for a slower sweep. Press Ctrl-C when done, then
+`sudo systemctl start halo-led-temp` to go back to live temperatures.
+
+To make the bar less bright, `--peak=0.4` caps each breath at 40% (works with or without
+`--demo`).
+
 ## Managing the service
 
 | What | Command |
@@ -93,9 +110,11 @@ All settings are at the top of `halo-led-temp.py` (installed to
 | Setting | What it does | Default |
 |---|---|---|
 | `STOPS` | Temperature (°C) → color (R, G, B, 0–255) points | 40 °C blue … 102 °C red |
-| `SLOW_PERIOD` | Seconds per breath at the coolest stop | `4.0` |
-| `FAST_PERIOD` | Seconds per breath at the hottest stop | `0.8` |
+| `SLOW_PERIOD` | Seconds per breath at the coolest stop | `8.0` |
+| `FAST_PERIOD` | Seconds per breath at the hottest stop | `3.0` |
 | `MIN_BRIGHT` | Dimmest point of each breath (0–1); keeps it from going dark | `0.12` |
+| `PEAK_BRIGHT` | Brightest point of each breath (0–1); `--peak=N` overrides | `1.0` |
+| `DEMO_SECONDS` | Length of one `--demo` sweep; `--demo=N` overrides | `60` |
 | `GAMMA` | Fade shape; higher lingers longer in the dim part | `2.0` |
 | `FRAME` | Seconds between updates (0.05 = 20 fps) | `0.05` |
 | `TEMP_POLL` | Seconds between temperature reads | `1.0` |
